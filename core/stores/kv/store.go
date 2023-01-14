@@ -16,6 +16,14 @@ import (
 var ErrNoRedisNode = errors.New("no redis node")
 
 type (
+	// Pipeliner is an alias of redis.Pipeliner.
+	Pipeliner = redis.Pipeliner
+
+	Pipeline interface {
+		Pipelined(fn func(Pipeliner) error) error
+		PipelinedCtx(ctx context.Context, fn func(Pipeliner) error) error
+	}
+
 	// Store interface represents a KV store.
 	Store interface {
 		Decr(key string) (int64, error)
@@ -150,6 +158,8 @@ type (
 		ZscoreCtx(ctx context.Context, key, value string) (int64, error)
 		Zrevrank(key, field string) (int64, error)
 		ZrevrankCtx(ctx context.Context, key, field string) (int64, error)
+
+		GetPipeline(key string) (Pipeline, error)
 	}
 
 	clusterStore struct {
@@ -607,7 +617,8 @@ func (cs clusterStore) MgetCtx(ctx context.Context, keys ...string) ([]string, e
 				var (
 					cmds = make([]*redis.StringCmd, len(ks))
 				)
-				if err := r.PipelinedCtx(
+
+				err := r.PipelinedCtx(
 					ctx,
 					func(pipe redis.Pipeliner) error {
 						for i, k := range ks {
@@ -615,7 +626,8 @@ func (cs clusterStore) MgetCtx(ctx context.Context, keys ...string) ([]string, e
 						}
 
 						return nil
-					}); err != nil {
+					})
+				if err != nil {
 					be.Add(err)
 				} else {
 					//
@@ -1116,6 +1128,15 @@ func (cs clusterStore) ZscoreCtx(ctx context.Context, key, value string) (int64,
 }
 
 func (cs clusterStore) getRedis(key string) (*redis.Redis, error) {
+	val, ok := cs.dispatcher.Get(key)
+	if !ok {
+		return nil, ErrNoRedisNode
+	}
+
+	return val.(*redis.Redis), nil
+}
+
+func (cs clusterStore) GetPipeline(key string) (Pipeline, error) {
 	val, ok := cs.dispatcher.Get(key)
 	if !ok {
 		return nil, ErrNoRedisNode
