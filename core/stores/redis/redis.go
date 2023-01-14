@@ -77,6 +77,8 @@ type (
 	FloatCmd = red.FloatCmd
 	// StringCmd is an alias of redis.StringCmd.
 	StringCmd = red.StringCmd
+	// StringStringMapCmd is an alias of redis.StringStringMapCmd.
+	StringStringMapCmd = red.StringStringMapCmd
 )
 
 // New returns a Redis with given options.
