@@ -45,6 +45,11 @@ func (s *Stat) IncrementMiss() {
 	atomic.AddUint64(&s.Miss, 1)
 }
 
+// IncrementMissN increments the miss count.
+func (s *Stat) IncrementMissN(n uint64) {
+	atomic.AddUint64(&s.Miss, n)
+}
+
 // IncrementDbFails increments the db fail count.
 func (s *Stat) IncrementDbFails() {
 	atomic.AddUint64(&s.DbFails, 1)

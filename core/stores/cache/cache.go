@@ -46,6 +46,12 @@ type (
 		// query from DB and set cache using given expire, then return the result.
 		TakeWithExpireCtx(ctx context.Context, val interface{}, key string,
 			query func(val interface{}, expire time.Duration) error) error
+		// Takes takes the result from cache first, if not found,
+		// query from DB and set cache using c.expiry, then return the result.
+		Takes(query func(keys ...string) (map[string]interface{}, error), cacheF func(k, v string) (interface{}, error), keys ...string) error
+		// TakesCtx takes the result from cache first, if not found,
+		// query from DB and set cache using c.expiry, then return the result.
+		TakesCtx(ctx context.Context, query func(keys ...string) (map[string]interface{}, error), cacheF func(k, v string) (interface{}, error), keys ...string) error
 	}
 
 	cacheCluster struct {
@@ -199,4 +205,31 @@ func (cc cacheCluster) TakeWithExpireCtx(ctx context.Context, val interface{}, k
 	}
 
 	return c.(Cache).TakeWithExpireCtx(ctx, val, key, query)
+}
+
+func (cc cacheCluster) Takes(query func(keys ...string) (map[string]interface{}, error), cacheF func(k, v string) (interface{}, error), keys ...string) error {
+	return cc.TakesCtx(context.Background(), query, cacheF, keys...)
+}
+
+func (cc cacheCluster) TakesCtx(ctx context.Context, query func(keys ...string) (map[string]interface{}, error), cacheF func(k, v string) (interface{}, error), keys ...string) error {
+	var be errorx.BatchError
+	nodes := make(map[interface{}][]string)
+	for _, key := range keys {
+		c, ok := cc.dispatcher.Get(key)
+		if !ok {
+			be.Add(fmt.Errorf("key %q not found", key))
+			continue
+		}
+
+		nodes[c] = append(nodes[c], key)
+	}
+	for c, ks := range nodes {
+		if err := c.(Cache).TakesCtx(ctx, func(keys ...string) (map[string]interface{}, error) {
+			return query(keys...)
+		}, cacheF, ks...); err != nil {
+			be.Add(err)
+		}
+	}
+
+	return be.Err()
 }

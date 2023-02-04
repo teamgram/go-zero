@@ -1196,6 +1196,49 @@ func (s *Redis) MgetCtx(ctx context.Context, keys ...string) (val []string, err 
 	return
 }
 
+func (s *Redis) Mset(fieldsAndValues map[string]string) error {
+	return s.MsetCtx(context.Background(), fieldsAndValues)
+}
+
+func (s *Redis) MsetCtx(ctx context.Context, fieldsAndValues map[string]string) error {
+	return s.brk.DoWithAcceptable(func() error {
+		conn, err := getRedis(s)
+		if err != nil {
+			return err
+		}
+
+		vals := make(map[string]interface{}, len(fieldsAndValues))
+		for k, v := range fieldsAndValues {
+			vals[k] = v
+		}
+
+		return conn.MSet(ctx, vals).Err()
+	}, acceptable)
+}
+
+func (s *Redis) Msetnx(fieldsAndValues map[string]string) (bool, error) {
+	return s.MsetnxCtx(context.Background(), fieldsAndValues)
+}
+
+func (s *Redis) MsetnxCtx(ctx context.Context, fieldsAndValues map[string]string) (val bool, err error) {
+	err = s.brk.DoWithAcceptable(func() error {
+		conn, err := getRedis(s)
+		if err != nil {
+			return err
+		}
+
+		vals := make(map[string]interface{}, len(fieldsAndValues))
+		for k, v := range fieldsAndValues {
+			vals[k] = v
+		}
+
+		val, err = conn.MSetNX(ctx, vals).Result()
+		return err
+	}, acceptable)
+
+	return
+}
+
 // Persist is the implementation of redis persist command.
 func (s *Redis) Persist(key string) (bool, error) {
 	return s.PersistCtx(context.Background(), key)

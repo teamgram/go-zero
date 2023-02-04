@@ -108,6 +108,14 @@ func (mc *mockedNode) TakeWithExpireCtx(ctx context.Context, val interface{}, ke
 	})
 }
 
+func (mc *mockedNode) Takes(query func(keys ...string) (map[string]interface{}, error), cacheF func(k, v string) (interface{}, error), keys ...string) error {
+	return mc.TakesCtx(context.Background(), query, cacheF, keys...)
+}
+
+func (mc *mockedNode) TakesCtx(ctx context.Context, query func(keys ...string) (map[string]interface{}, error), cacheF func(k, v string) (interface{}, error), keys ...string) error {
+	return nil
+}
+
 func TestCache_SetDel(t *testing.T) {
 	const total = 1000
 	r1, clean1, err := redistest.CreateRedis()
