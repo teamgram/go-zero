@@ -287,8 +287,7 @@ func (c cacheNode) Takes(query func(keys ...string) (map[string]interface{}, err
 func (c cacheNode) TakesCtx(ctx context.Context, query func(keys ...string) (map[string]interface{}, error), cacheF func(k, v string) (interface{}, error), keys ...string) error {
 	logger := logx.WithContext(ctx)
 	_ = logger
-	//barrierKey := strings.Join(keys, "-")
-	//val, fresh, err := c.barrier.DoEx(barrierKey, func() (interface{}, error) {
+
 	var (
 		cmds  = make([]*redis.StringCmd, len(keys))
 		qKeys = make([]string, 0, len(keys))
@@ -318,6 +317,10 @@ func (c cacheNode) TakesCtx(ctx context.Context, query func(keys ...string) (map
 		}
 	}
 
+	if len(qKeys) == 0 {
+		return nil
+	}
+
 	values, err := query(qKeys...)
 	if err != nil {
 		c.stat.IncrementDbFails()
@@ -343,16 +346,6 @@ func (c cacheNode) TakesCtx(ctx context.Context, query func(keys ...string) (map
 		})
 	}
 
-	//	return nil, nil
-	//})
-	//if err != nil {
-	//	return err
-	//}
-	//if fresh {
-	//	return nil
-	//}
-	//
-	//_ = val
 	return nil
 }
 
