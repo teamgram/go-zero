@@ -421,20 +421,28 @@ func (s *Redis) ExistsCtx(ctx context.Context, key string) (val bool, err error)
 }
 
 // Expire is the implementation of redis expire command.
-func (s *Redis) Expire(key string, seconds int) error {
+func (s *Redis) Expire(key string, seconds int) (bool, error) {
 	return s.ExpireCtx(context.Background(), key, seconds)
 }
 
 // ExpireCtx is the implementation of redis expire command.
-func (s *Redis) ExpireCtx(ctx context.Context, key string, seconds int) error {
-	return s.brk.DoWithAcceptable(func() error {
+func (s *Redis) ExpireCtx(ctx context.Context, key string, seconds int) (val bool, err error) {
+	err = s.brk.DoWithAcceptable(func() error {
 		conn, err := getRedis(s)
 		if err != nil {
 			return err
 		}
 
-		return conn.Expire(ctx, key, time.Duration(seconds)*time.Second).Err()
+		v, err := conn.Expire(ctx, key, time.Duration(seconds)*time.Second).Result()
+		if err != nil {
+			return err
+		}
+
+		val = v
+		return nil
 	}, acceptable)
+
+	return
 }
 
 // Expireat is the implementation of redis expireat command.

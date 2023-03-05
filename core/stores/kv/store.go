@@ -36,8 +36,8 @@ type (
 		EvalCtx(ctx context.Context, script, key string, args ...interface{}) (interface{}, error)
 		Exists(key string) (bool, error)
 		ExistsCtx(ctx context.Context, key string) (bool, error)
-		Expire(key string, seconds int) error
-		ExpireCtx(ctx context.Context, key string, seconds int) error
+		Expire(key string, seconds int) (bool, error)
+		ExpireCtx(ctx context.Context, key string, seconds int) (bool, error)
 		Expireat(key string, expireTime int64) error
 		ExpireatCtx(ctx context.Context, key string, expireTime int64) error
 		Get(key string) (string, error)
@@ -263,14 +263,14 @@ func (cs clusterStore) ExistsCtx(ctx context.Context, key string) (bool, error) 
 	return node.ExistsCtx(ctx, key)
 }
 
-func (cs clusterStore) Expire(key string, seconds int) error {
+func (cs clusterStore) Expire(key string, seconds int) (bool, error) {
 	return cs.ExpireCtx(context.Background(), key, seconds)
 }
 
-func (cs clusterStore) ExpireCtx(ctx context.Context, key string, seconds int) error {
+func (cs clusterStore) ExpireCtx(ctx context.Context, key string, seconds int) (bool, error) {
 	node, err := cs.getRedis(key)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	return node.ExpireCtx(ctx, key, seconds)
