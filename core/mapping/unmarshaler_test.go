@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+
 	"github.com/zeromicro/go-zero/core/stringx"
 )
 
@@ -793,7 +794,9 @@ func TestUnmarshalStringMapFromNotSettableValue(t *testing.T) {
 	}
 
 	ast := assert.New(t)
-	ast.Error(UnmarshalKey(m, &v))
+	ast.NoError(UnmarshalKey(m, &v))
+	assert.Empty(t, v.sort)
+	assert.Nil(t, v.psort)
 }
 
 func TestUnmarshalStringMapFromString(t *testing.T) {
@@ -4265,6 +4268,24 @@ func TestUnmarshalStructPtrOfPtr(t *testing.T) {
 	}
 }
 
+func TestUnmarshalOnlyPublicVariables(t *testing.T) {
+	type demo struct {
+		age  int    `key:"age"`
+		Name string `key:"name"`
+	}
+
+	m := map[string]interface{}{
+		"age":  3,
+		"name": "go-zero",
+	}
+
+	var in demo
+	if assert.NoError(t, UnmarshalKey(m, &in)) {
+		assert.Equal(t, 0, in.age)
+		assert.Equal(t, "go-zero", in.Name)
+	}
+}
+
 func BenchmarkDefaultValue(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		var a struct {
@@ -4363,4 +4384,57 @@ func BenchmarkUnmarshal(b *testing.B) {
 		var an anonymous
 		UnmarshalKey(data, &an)
 	}
+}
+
+func TestFillDefaultUnmarshal(t *testing.T) {
+	fillDefaultUnmarshal := NewUnmarshaler(jsonTagKey, WithDefault())
+	t.Run("nil", func(t *testing.T) {
+		type St struct{}
+		err := fillDefaultUnmarshal.Unmarshal(map[string]interface{}{}, St{})
+		assert.Error(t, err)
+	})
+
+	t.Run("not nil", func(t *testing.T) {
+		type St struct{}
+		err := fillDefaultUnmarshal.Unmarshal(map[string]interface{}{}, &St{})
+		assert.NoError(t, err)
+	})
+
+	t.Run("default", func(t *testing.T) {
+		type St struct {
+			A string `json:",default=a"`
+			B string
+		}
+		var st St
+		err := fillDefaultUnmarshal.Unmarshal(map[string]interface{}{}, &st)
+		assert.NoError(t, err)
+		assert.Equal(t, st.A, "a")
+	})
+
+	t.Run("env", func(t *testing.T) {
+		type St struct {
+			A string `json:",default=a"`
+			B string
+			C string `json:",env=TEST_C"`
+		}
+		t.Setenv("TEST_C", "c")
+
+		var st St
+		err := fillDefaultUnmarshal.Unmarshal(map[string]interface{}{}, &st)
+		assert.NoError(t, err)
+		assert.Equal(t, st.A, "a")
+		assert.Equal(t, st.C, "c")
+	})
+
+	t.Run("has value", func(t *testing.T) {
+		type St struct {
+			A string `json:",default=a"`
+			B string
+		}
+		var st = St{
+			A: "b",
+		}
+		err := fillDefaultUnmarshal.Unmarshal(map[string]interface{}{}, &st)
+		assert.Error(t, err)
+	})
 }

@@ -171,12 +171,10 @@ func TestCache_SetDel(t *testing.T) {
 		r1, err := miniredis.Run()
 		assert.NoError(t, err)
 		defer r1.Close()
-		r1.SetError("mock error")
 
 		r2, err := miniredis.Run()
 		assert.NoError(t, err)
 		defer r2.Close()
-		r2.SetError("mock error")
 
 		conf := ClusterConf{
 			{
@@ -195,6 +193,8 @@ func TestCache_SetDel(t *testing.T) {
 			},
 		}
 		c := New(conf, syncx.NewSingleFlight(), NewStat("mock"), errPlaceholder)
+		r1.SetError("mock error")
+		r2.SetError("mock error")
 		assert.NoError(t, c.Del("a", "b", "c"))
 	})
 }

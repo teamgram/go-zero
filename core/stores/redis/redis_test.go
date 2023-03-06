@@ -16,6 +16,116 @@ import (
 	"github.com/zeromicro/go-zero/core/stringx"
 )
 
+func TestNewRedis(t *testing.T) {
+	r1, err := miniredis.Run()
+	assert.NoError(t, err)
+	defer r1.Close()
+
+	r2, err := miniredis.Run()
+	assert.NoError(t, err)
+	defer r2.Close()
+	r2.SetError("mock")
+
+	tests := []struct {
+		name string
+		RedisConf
+		ok       bool
+		redisErr bool
+	}{
+		{
+			name: "missing host",
+			RedisConf: RedisConf{
+				Host: "",
+				Type: NodeType,
+				Pass: "",
+			},
+			ok: false,
+		},
+		{
+			name: "missing type",
+			RedisConf: RedisConf{
+				Host: "localhost:6379",
+				Type: "",
+				Pass: "",
+			},
+			ok: false,
+		},
+		{
+			name: "ok",
+			RedisConf: RedisConf{
+				Host: r1.Addr(),
+				Type: NodeType,
+				Pass: "",
+			},
+			ok: true,
+		},
+		{
+			name: "ok",
+			RedisConf: RedisConf{
+				Host: r1.Addr(),
+				Type: ClusterType,
+				Pass: "",
+			},
+			ok: true,
+		},
+		{
+			name: "password",
+			RedisConf: RedisConf{
+				Host: r1.Addr(),
+				Type: NodeType,
+				Pass: "pw",
+			},
+			ok: true,
+		},
+		{
+			name: "tls",
+			RedisConf: RedisConf{
+				Host: r1.Addr(),
+				Type: NodeType,
+				Tls:  true,
+			},
+			ok: true,
+		},
+		{
+			name: "node error",
+			RedisConf: RedisConf{
+				Host: r2.Addr(),
+				Type: NodeType,
+				Pass: "",
+			},
+			ok:       true,
+			redisErr: true,
+		},
+		{
+			name: "cluster error",
+			RedisConf: RedisConf{
+				Host: r2.Addr(),
+				Type: ClusterType,
+				Pass: "",
+			},
+			ok:       true,
+			redisErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(stringx.RandId(), func(t *testing.T) {
+			rds, err := NewRedis(test.RedisConf)
+			if test.ok {
+				if test.redisErr {
+					assert.Error(t, err)
+					assert.Nil(t, rds)
+				} else {
+					assert.NoError(t, err)
+					assert.NotNil(t, rds)
+				}
+			} else {
+				assert.Error(t, err)
+			}
+		})
+	}
+}
+
 func TestRedis_Decr(t *testing.T) {
 	runOnRedis(t, func(client *Redis) {
 		_, err := New(client.Addr, badType()).Decr("a")
@@ -1651,42 +1761,17 @@ func TestRedis_WithPass(t *testing.T) {
 func runOnRedis(t *testing.T, fn func(client *Redis)) {
 	logx.Disable()
 
-	s, err := miniredis.Run()
-	assert.Nil(t, err)
-	defer func() {
-		client, err := clientManager.GetResource(s.Addr(), func() (io.Closer, error) {
-			return nil, errors.New("should already exist")
-		})
-		if err != nil {
-			t.Error(err)
-		}
-
-		if client != nil {
-			_ = client.Close()
-		}
-	}()
-
-	fn(New(s.Addr()))
+	s := miniredis.RunT(t)
+	fn(MustNewRedis(RedisConf{
+		Host: s.Addr(),
+		Type: NodeType,
+	}))
 }
 
 func runOnRedisWithError(t *testing.T, fn func(client *Redis)) {
 	logx.Disable()
 
-	s, err := miniredis.Run()
-	assert.NoError(t, err)
-	defer func() {
-		client, err := clientManager.GetResource(s.Addr(), func() (io.Closer, error) {
-			return nil, errors.New("should already exist")
-		})
-		if err != nil {
-			t.Error(err)
-		}
-
-		if client != nil {
-			_ = client.Close()
-		}
-	}()
-
+	s := miniredis.RunT(t)
 	s.SetError("mock error")
 	fn(New(s.Addr()))
 }
