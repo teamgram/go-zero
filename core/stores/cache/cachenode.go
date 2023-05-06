@@ -294,15 +294,19 @@ func (c cacheNode) TakesCtx(ctx context.Context, query func(keys ...string) (map
 		qKeys = make([]string, 0, len(keys))
 	)
 
-	c.rds.PipelinedCtx(ctx, func(pipe redis.Pipeliner) error {
+	err := c.rds.PipelinedCtx(ctx, func(pipe redis.Pipeliner) error {
 		for i, key := range keys {
 			cmds[i] = pipe.Get(ctx, key)
 		}
 		return nil
 	})
+	if err != nil {
+		logger.Error(err)
+		return err
+	}
 
 	for i, cmd := range cmds {
-		if err := c.doGetCache2(ctx, keys[i], cmd, cacheF); err != nil {
+		if err = c.doGetCache2(ctx, keys[i], cmd, cacheF); err != nil {
 			if err == errPlaceholder {
 				// return nil, c.errNotFound
 				continue
