@@ -300,7 +300,7 @@ func (c cacheNode) TakesCtx(ctx context.Context, query func(keys ...string) (map
 		}
 		return nil
 	})
-	if err != nil {
+	if err != nil && err != redis.Nil {
 		logger.Error(err)
 		return err
 	}
