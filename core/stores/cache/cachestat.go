@@ -72,3 +72,8 @@ func (s *Stat) statLoop(ticker timex.Ticker) {
 			s.name, total, percent, hit, miss, dbf)
 	}
 }
+
+// IncrementMissN increments the miss count.
+func (s *Stat) IncrementMissN(n uint64) {
+	atomic.AddUint64(&s.Miss, n)
+}

@@ -311,7 +311,7 @@ func TestRedis_Persist(t *testing.T) {
 	store := clusterStore{dispatcher: hash.NewConsistentHash()}
 	_, err := store.Persist("key")
 	assert.NotNil(t, err)
-	err = store.Expire("key", 5)
+	_, err = store.Expire("key", 5)
 	assert.NotNil(t, err)
 	err = store.Expireat("key", time.Now().Unix()+5)
 	assert.NotNil(t, err)
@@ -325,7 +325,7 @@ func TestRedis_Persist(t *testing.T) {
 		ok, err = client.Persist("key")
 		assert.Nil(t, err)
 		assert.False(t, ok)
-		err = client.Expire("key", 5)
+		_, err = client.Expire("key", 5)
 		assert.Nil(t, err)
 		ok, err = client.Persist("key")
 		assert.Nil(t, err)

@@ -3,6 +3,7 @@ package kv
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 
 	"github.com/zeromicro/go-zero/core/errorx"
@@ -15,6 +16,14 @@ import (
 var ErrNoRedisNode = errors.New("no redis node")
 
 type (
+	// Pipeliner is an alias of redis.Pipeliner.
+	Pipeliner = redis.Pipeliner
+
+	Pipeline interface {
+		Pipelined(fn func(Pipeliner) error) error
+		PipelinedCtx(ctx context.Context, fn func(Pipeliner) error) error
+	}
+
 	// Store interface represents a KV store.
 	Store interface {
 		Decr(key string) (int64, error)
@@ -27,8 +36,8 @@ type (
 		EvalCtx(ctx context.Context, script, key string, args ...any) (any, error)
 		Exists(key string) (bool, error)
 		ExistsCtx(ctx context.Context, key string) (bool, error)
-		Expire(key string, seconds int) error
-		ExpireCtx(ctx context.Context, key string, seconds int) error
+		Expire(key string, seconds int) (bool, error)
+		ExpireCtx(ctx context.Context, key string, seconds int) (bool, error)
 		Expireat(key string, expireTime int64) error
 		ExpireatCtx(ctx context.Context, key string, expireTime int64) error
 		Get(key string) (string, error)
@@ -75,6 +84,8 @@ type (
 		LrangeCtx(ctx context.Context, key string, start, stop int) ([]string, error)
 		Lrem(key string, count int, value string) (int, error)
 		LremCtx(ctx context.Context, key string, count int, value string) (int, error)
+		Mget(keys ...string) ([]string, error)
+		MgetCtx(ctx context.Context, keys ...string) ([]string, error)
 		Persist(key string) (bool, error)
 		PersistCtx(ctx context.Context, key string) (bool, error)
 		Pfadd(key string, values ...any) (bool, error)
@@ -147,6 +158,7 @@ type (
 		ZscoreCtx(ctx context.Context, key, value string) (int64, error)
 		Zrevrank(key, field string) (int64, error)
 		ZrevrankCtx(ctx context.Context, key, field string) (int64, error)
+		GetPipeline(key string) (Pipeline, error)
 	}
 
 	clusterStore struct {
@@ -250,14 +262,14 @@ func (cs clusterStore) ExistsCtx(ctx context.Context, key string) (bool, error) 
 	return node.ExistsCtx(ctx, key)
 }
 
-func (cs clusterStore) Expire(key string, seconds int) error {
+func (cs clusterStore) Expire(key string, seconds int) (bool, error) {
 	return cs.ExpireCtx(context.Background(), key, seconds)
 }
 
-func (cs clusterStore) ExpireCtx(ctx context.Context, key string, seconds int) error {
+func (cs clusterStore) ExpireCtx(ctx context.Context, key string, seconds int) (bool, error) {
 	node, err := cs.getRedis(key)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	return node.ExpireCtx(ctx, key, seconds)
@@ -547,6 +559,89 @@ func (cs clusterStore) LremCtx(ctx context.Context, key string, count int, value
 	}
 
 	return node.LremCtx(ctx, key, count, value)
+}
+
+func (cs clusterStore) Mget(keys ...string) ([]string, error) {
+	return cs.MgetCtx(context.Background(), keys...)
+}
+
+func (cs clusterStore) MgetCtx(ctx context.Context, keys ...string) ([]string, error) {
+	switch len(keys) {
+	case 0:
+		return nil, nil
+	case 1:
+		key := keys[0]
+		node, err := cs.getRedis(key)
+		if err != nil {
+			return nil, err
+		}
+
+		val2, err2 := node.GetCtx(ctx, key)
+		if err2 != nil {
+			return nil, err2
+		}
+
+		return []string{val2}, err2
+	default:
+		var (
+			be errorx.BatchError
+		)
+
+		nodes := make(map[interface{}][]string)
+		idxList := make(map[interface{}][]int)
+		val := make([]string, len(keys))
+		for i, key := range keys {
+			c, ok := cs.dispatcher.Get(key)
+			if !ok {
+				be.Add(fmt.Errorf("key %q not found", key))
+				continue
+			}
+
+			nodes[c] = append(nodes[c], key)
+			idxList[c] = append(idxList[c], i)
+		}
+		for c, ks := range nodes {
+			r := c.(*redis.Redis)
+
+			switch r.Type {
+			case redis.NodeType:
+				if vals, err := r.MgetCtx(ctx, ks...); err != nil {
+					be.Add(err)
+				} else {
+					for i, _ := range ks {
+						val[idxList[c][i]] = vals[i]
+					}
+				}
+			case redis.ClusterType:
+				var (
+					cmds = make([]*redis.StringCmd, len(ks))
+				)
+
+				err := r.PipelinedCtx(
+					ctx,
+					func(pipe redis.Pipeliner) error {
+						for i, k := range ks {
+							cmds[i] = pipe.Get(ctx, k)
+						}
+
+						return nil
+					})
+				if err != nil {
+					be.Add(err)
+				} else {
+					//
+					for i, cmd := range cmds {
+						val[i], err = cmd.Result()
+						if err != nil {
+							be.Add(err)
+						}
+					}
+				}
+			}
+		}
+
+		return val, be.Err()
+	}
 }
 
 func (cs clusterStore) Persist(key string) (bool, error) {
@@ -1032,6 +1127,15 @@ func (cs clusterStore) ZscoreCtx(ctx context.Context, key, value string) (int64,
 }
 
 func (cs clusterStore) getRedis(key string) (*redis.Redis, error) {
+	val, ok := cs.dispatcher.Get(key)
+	if !ok {
+		return nil, ErrNoRedisNode
+	}
+
+	return val.(*redis.Redis), nil
+}
+
+func (cs clusterStore) GetPipeline(key string) (Pipeline, error) {
 	val, ok := cs.dispatcher.Get(key)
 	if !ok {
 		return nil, ErrNoRedisNode

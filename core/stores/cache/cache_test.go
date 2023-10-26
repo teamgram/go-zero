@@ -109,6 +109,14 @@ func (mc *mockedNode) TakeWithExpireCtx(ctx context.Context, val any, key string
 	})
 }
 
+func (mc *mockedNode) Takes(query func(keys ...string) (map[string]any, error), cacheF func(k, v string) (any, error), keys ...string) error {
+	return mc.TakesCtx(context.Background(), query, cacheF, keys...)
+}
+
+func (mc *mockedNode) TakesCtx(ctx context.Context, query func(keys ...string) (map[string]any, error), cacheF func(k, v string) (any, error), keys ...string) error {
+	return nil
+}
+
 func TestCache_SetDel(t *testing.T) {
 	t.Run("test set del", func(t *testing.T) {
 		const total = 1000

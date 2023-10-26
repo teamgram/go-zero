@@ -89,6 +89,8 @@ type (
 	StringCmd = red.StringCmd
 	// Script is an alias of redis.Script.
 	Script = red.Script
+	// StringStringMapCmd is an alias of redis.StringStringMapCmd.
+	StringStringMapCmd = red.StringStringMapCmd
 )
 
 // MustNewRedis returns a Redis with given options.
@@ -468,20 +470,28 @@ func (s *Redis) ExistsCtx(ctx context.Context, key string) (val bool, err error)
 }
 
 // Expire is the implementation of redis expire command.
-func (s *Redis) Expire(key string, seconds int) error {
+func (s *Redis) Expire(key string, seconds int) (bool, error) {
 	return s.ExpireCtx(context.Background(), key, seconds)
 }
 
 // ExpireCtx is the implementation of redis expire command.
-func (s *Redis) ExpireCtx(ctx context.Context, key string, seconds int) error {
-	return s.brk.DoWithAcceptable(func() error {
-		conn, err := getRedis(s)
-		if err != nil {
-			return err
+func (s *Redis) ExpireCtx(ctx context.Context, key string, seconds int) (val bool, err error) {
+	err = s.brk.DoWithAcceptable(func() error {
+		conn, err2 := getRedis(s)
+		if err2 != nil {
+			return err2
 		}
 
-		return conn.Expire(ctx, key, time.Duration(seconds)*time.Second).Err()
+		v, err3 := conn.Expire(ctx, key, time.Duration(seconds)*time.Second).Result()
+		if err3 != nil {
+			return err3
+		}
+
+		val = v
+		return nil
 	}, acceptable)
+
+	return
 }
 
 // Expireat is the implementation of redis expireat command.
@@ -1306,6 +1316,49 @@ func (s *Redis) MgetCtx(ctx context.Context, keys ...string) (val []string, err 
 
 		val = toStrings(v)
 		return nil
+	}, acceptable)
+
+	return
+}
+
+func (s *Redis) Mset(fieldsAndValues map[string]string) error {
+	return s.MsetCtx(context.Background(), fieldsAndValues)
+}
+
+func (s *Redis) MsetCtx(ctx context.Context, fieldsAndValues map[string]string) error {
+	return s.brk.DoWithAcceptable(func() error {
+		conn, err := getRedis(s)
+		if err != nil {
+			return err
+		}
+
+		vals := make(map[string]interface{}, len(fieldsAndValues))
+		for k, v := range fieldsAndValues {
+			vals[k] = v
+		}
+
+		return conn.MSet(ctx, vals).Err()
+	}, acceptable)
+}
+
+func (s *Redis) Msetnx(fieldsAndValues map[string]string) (bool, error) {
+	return s.MsetnxCtx(context.Background(), fieldsAndValues)
+}
+
+func (s *Redis) MsetnxCtx(ctx context.Context, fieldsAndValues map[string]string) (val bool, err error) {
+	err = s.brk.DoWithAcceptable(func() error {
+		conn, err := getRedis(s)
+		if err != nil {
+			return err
+		}
+
+		vals := make(map[string]interface{}, len(fieldsAndValues))
+		for k, v := range fieldsAndValues {
+			vals[k] = v
+		}
+
+		val, err = conn.MSetNX(ctx, vals).Result()
+		return err
 	}, acceptable)
 
 	return

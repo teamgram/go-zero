@@ -280,3 +280,118 @@ func (c cacheNode) setCacheWithNotFound(ctx context.Context, key string) error {
 	_, err := c.rds.SetnxExCtx(ctx, key, notFoundPlaceholder, seconds)
 	return err
 }
+
+func (c cacheNode) Takes(query func(keys ...string) (map[string]any, error), cacheF func(k, v string) (any, error), keys ...string) error {
+	return c.TakesCtx(context.Background(), query, cacheF, keys...)
+}
+
+func (c cacheNode) TakesCtx(ctx context.Context, query func(keys ...string) (map[string]any, error), cacheF func(k, v string) (any, error), keys ...string) error {
+	logger := logx.WithContext(ctx)
+	_ = logger
+
+	var (
+		cmds  = make([]*redis.StringCmd, len(keys))
+		qKeys = make([]string, 0, len(keys))
+	)
+
+	err := c.rds.PipelinedCtx(ctx, func(pipe redis.Pipeliner) error {
+		for i, key := range keys {
+			cmds[i] = pipe.Get(ctx, key)
+		}
+		return nil
+	})
+	if err != nil && err != redis.Nil {
+		logger.Error(err)
+		return err
+	}
+
+	for i, cmd := range cmds {
+		if err = c.doGetCache2(ctx, keys[i], cmd, cacheF); err != nil {
+			if err == errPlaceholder {
+				// return nil, c.errNotFound
+				continue
+			} else if err != c.errNotFound {
+				// why we just return the error instead of query from db,
+				// because we don't allow the disaster pass to the dbs.
+				// fail fast, in case we bring down the dbs.
+				// return nil, err
+				continue
+			}
+
+			qKeys = append(qKeys, keys[i])
+		}
+	}
+
+	if len(qKeys) == 0 {
+		return nil
+	}
+
+	values, err := query(qKeys...)
+	if err != nil {
+		c.stat.IncrementDbFails()
+		logger.Error(err)
+	} else {
+		c.rds.PipelinedCtx(ctx, func(pipe redis.Pipeliner) error {
+			for k, v := range values {
+				if v == nil {
+					seconds := int(math.Ceil(c.aroundDuration(c.notFoundExpiry).Seconds()))
+					pipe.SetEX(ctx, k, notFoundPlaceholder, time.Duration(seconds)*time.Second)
+				} else {
+					data, err2 := jsonx.MarshalToString(v)
+					if err2 != nil {
+						logger.Error(err2)
+					} else {
+						seconds := int(math.Ceil(c.aroundDuration(c.expiry).Seconds()))
+						pipe.SetEX(ctx, k, data, time.Duration(seconds)*time.Second)
+					}
+				}
+			}
+
+			return nil
+		})
+	}
+
+	return nil
+}
+
+func (c cacheNode) doGetCache2(ctx context.Context, key string, p *redis.StringCmd, cacheF func(k, v string) (any, error)) error {
+	c.stat.IncrementTotal()
+	data, err := p.Result()
+	if err == redis.Nil {
+		err = nil
+	}
+	if err != nil {
+		c.stat.IncrementMiss()
+		return err
+	}
+	if len(data) == 0 {
+		c.stat.IncrementMiss()
+		return c.errNotFound
+	}
+
+	c.stat.IncrementHit()
+	if data == notFoundPlaceholder {
+		return errPlaceholder
+	}
+
+	return c.processCache2(ctx, key, data, cacheF)
+}
+
+func (c cacheNode) processCache2(ctx context.Context, key, data string, cacheF func(k, v string) (any, error)) error {
+	_, err := cacheF(key, data)
+	if err == nil {
+		return nil
+	}
+	report := fmt.Sprintf("unmarshal cache, node: %s, key: %s, value: %s, error: %v",
+		c.rds.Addr, key, data, err)
+	logger := logx.WithContext(ctx)
+	logger.Error(report)
+	stat.Report(report)
+	if _, e := c.rds.DelCtx(ctx, key); e != nil {
+		logger.Errorf("delete invalid cache, node: %s, key: %s, value: %s, error: %v",
+			c.rds.Addr, key, data, e)
+	}
+
+	// returns errNotFound to reload the value by the given queryFn
+	return c.errNotFound
+}
