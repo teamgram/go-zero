@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -224,11 +223,11 @@ func (u *Unmarshaler) fillSliceFromString(fieldType reflect.Type, value reflect.
 	switch v := mapValue.(type) {
 	case fmt.Stringer:
 		if err := jsonx.UnmarshalFromString(v.String(), &slice); err != nil {
-			return err
+			return fmt.Errorf("fullName: `%s`, error: `%w`", fullName, err)
 		}
 	case string:
 		if err := jsonx.UnmarshalFromString(v, &slice); err != nil {
-			return err
+			return fmt.Errorf("fullName: `%s`, error: `%w`", fullName, err)
 		}
 	default:
 		return errUnsupportedType
@@ -250,6 +249,10 @@ func (u *Unmarshaler) fillSliceFromString(fieldType reflect.Type, value reflect.
 
 func (u *Unmarshaler) fillSliceValue(slice reflect.Value, index int,
 	baseKind reflect.Kind, value any, fullName string) error {
+	if value == nil {
+		return errNilSliceElement
+	}
+
 	ithVal := slice.Index(index)
 	switch v := value.(type) {
 	case fmt.Stringer:
@@ -423,6 +426,10 @@ func (u *Unmarshaler) parseOptionsWithContext(field reflect.StructField, m Value
 				OptionalDep: u.opts.canonicalKey(options.OptionalDep),
 			}
 		}
+	}
+
+	if u.opts.fillDefault {
+		return key, &options.fieldOptionsWithContext, nil
 	}
 
 	optsWithContext, err := options.toOptionsWithContext(key, m, fullName)
@@ -622,7 +629,12 @@ func (u *Unmarshaler) processFieldPrimitiveWithJSONNumber(fieldType reflect.Type
 			return err
 		}
 
-		if fValue > math.MaxFloat32 {
+		// if value is a pointer, we need to check overflow with the pointer's value.
+		derefedValue := value
+		for derefedValue.Type().Kind() == reflect.Ptr {
+			derefedValue = derefedValue.Elem()
+		}
+		if derefedValue.CanFloat() && derefedValue.OverflowFloat(fValue) {
 			return fmt.Errorf("parsing %q as float32: value out of range", v.String())
 		}
 

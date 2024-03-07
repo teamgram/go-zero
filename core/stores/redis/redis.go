@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	red "github.com/go-redis/redis/v8"
+	red "github.com/redis/go-redis/v9"
 	"github.com/zeromicro/go-zero/core/breaker"
 	"github.com/zeromicro/go-zero/core/errorx"
 	"github.com/zeromicro/go-zero/core/logx"
@@ -64,6 +64,7 @@ type (
 	// RedisNode interface represents a redis node.
 	RedisNode interface {
 		red.Cmdable
+		red.BitMapCmdable
 	}
 
 	// GeoLocation is used with GeoAdd to add geospatial location.
@@ -469,6 +470,28 @@ func (s *Redis) ExistsCtx(ctx context.Context, key string) (val bool, err error)
 	return
 }
 
+// ExistsMany is the implementation of redis exists command.
+// checks the existence of multiple keys in Redis using the EXISTS command.
+func (s *Redis) ExistsMany(keys ...string) (int64, error) {
+	return s.ExistsManyCtx(context.Background(), keys...)
+}
+
+// ExistsManyCtx is the implementation of redis exists command.
+// checks the existence of multiple keys in Redis using the EXISTS command.
+func (s *Redis) ExistsManyCtx(ctx context.Context, keys ...string) (val int64, err error) {
+	err = s.brk.DoWithAcceptable(func() error {
+		conn, err := getRedis(s)
+		if err != nil {
+			return err
+		}
+
+		val, err = conn.Exists(ctx, keys...).Result()
+		return err
+	}, acceptable)
+
+	return
+}
+
 // Expire is the implementation of redis expire command.
 func (s *Redis) Expire(key string, seconds int) (bool, error) {
 	return s.ExpireCtx(context.Background(), key, seconds)
@@ -525,13 +548,8 @@ func (s *Redis) GeoAddCtx(ctx context.Context, key string, geoLocation ...*GeoLo
 			return err
 		}
 
-		v, err := conn.GeoAdd(ctx, key, geoLocation...).Result()
-		if err != nil {
-			return err
-		}
-
-		val = v
-		return nil
+		val, err = conn.GeoAdd(ctx, key, geoLocation...).Result()
+		return err
 	}, acceptable)
 
 	return
@@ -551,13 +569,8 @@ func (s *Redis) GeoDistCtx(ctx context.Context, key, member1, member2, unit stri
 			return err
 		}
 
-		v, err := conn.GeoDist(ctx, key, member1, member2, unit).Result()
-		if err != nil {
-			return err
-		}
-
-		val = v
-		return nil
+		val, err = conn.GeoDist(ctx, key, member1, member2, unit).Result()
+		return err
 	}, acceptable)
 
 	return
@@ -577,13 +590,8 @@ func (s *Redis) GeoHashCtx(ctx context.Context, key string, members ...string) (
 			return err
 		}
 
-		v, err := conn.GeoHash(ctx, key, members...).Result()
-		if err != nil {
-			return err
-		}
-
-		val = v
-		return nil
+		val, err = conn.GeoHash(ctx, key, members...).Result()
+		return err
 	}, acceptable)
 
 	return
@@ -604,13 +612,8 @@ func (s *Redis) GeoRadiusCtx(ctx context.Context, key string, longitude, latitud
 			return err
 		}
 
-		v, err := conn.GeoRadius(ctx, key, longitude, latitude, query).Result()
-		if err != nil {
-			return err
-		}
-
-		val = v
-		return nil
+		val, err = conn.GeoRadius(ctx, key, longitude, latitude, query).Result()
+		return err
 	}, acceptable)
 
 	return
@@ -630,13 +633,8 @@ func (s *Redis) GeoRadiusByMemberCtx(ctx context.Context, key, member string,
 			return err
 		}
 
-		v, err := conn.GeoRadiusByMember(ctx, key, member, query).Result()
-		if err != nil {
-			return err
-		}
-
-		val = v
-		return nil
+		val, err = conn.GeoRadiusByMember(ctx, key, member, query).Result()
+		return err
 	}, acceptable)
 
 	return
@@ -656,13 +654,8 @@ func (s *Redis) GeoPosCtx(ctx context.Context, key string, members ...string) (
 			return err
 		}
 
-		v, err := conn.GeoPos(ctx, key, members...).Result()
-		if err != nil {
-			return err
-		}
-
-		val = v
-		return nil
+		val, err = conn.GeoPos(ctx, key, members...).Result()
+		return err
 	}, acceptable)
 
 	return
@@ -681,7 +674,7 @@ func (s *Redis) GetCtx(ctx context.Context, key string) (val string, err error) 
 			return err
 		}
 
-		if val, err = conn.Get(ctx, key).Result(); err == red.Nil {
+		if val, err = conn.Get(ctx, key).Result(); errors.Is(err, red.Nil) {
 			return nil
 		} else if err != nil {
 			return err
@@ -731,7 +724,7 @@ func (s *Redis) GetSetCtx(ctx context.Context, key, value string) (val string, e
 			return err
 		}
 
-		if val, err = conn.GetSet(ctx, key, value).Result(); err == red.Nil {
+		if val, err = conn.GetSet(ctx, key, value).Result(); errors.Is(err, red.Nil) {
 			return nil
 		}
 
@@ -857,17 +850,16 @@ func (s *Redis) HincrbyFloat(key, field string, increment float64) (float64, err
 }
 
 // HincrbyFloatCtx is the implementation of redis hincrbyfloat command.
-func (s *Redis) HincrbyFloatCtx(ctx context.Context, key, field string, increment float64) (val float64, err error) {
+func (s *Redis) HincrbyFloatCtx(ctx context.Context, key, field string, increment float64) (
+	val float64, err error) {
 	err = s.brk.DoWithAcceptable(func() error {
 		conn, err := getRedis(s)
 		if err != nil {
 			return err
 		}
+
 		val, err = conn.HIncrByFloat(ctx, key, field, increment).Result()
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	}, acceptable)
 
 	return
@@ -1321,43 +1313,20 @@ func (s *Redis) MgetCtx(ctx context.Context, keys ...string) (val []string, err 
 	return
 }
 
-func (s *Redis) Mset(fieldsAndValues map[string]string) error {
-	return s.MsetCtx(context.Background(), fieldsAndValues)
+// Mset is the implementation of redis mset command.
+func (s *Redis) Mset(fieldsAndValues ...any) (string, error) {
+	return s.MsetCtx(context.Background(), fieldsAndValues...)
 }
 
-func (s *Redis) MsetCtx(ctx context.Context, fieldsAndValues map[string]string) error {
-	return s.brk.DoWithAcceptable(func() error {
-		conn, err := getRedis(s)
-		if err != nil {
-			return err
-		}
-
-		vals := make(map[string]interface{}, len(fieldsAndValues))
-		for k, v := range fieldsAndValues {
-			vals[k] = v
-		}
-
-		return conn.MSet(ctx, vals).Err()
-	}, acceptable)
-}
-
-func (s *Redis) Msetnx(fieldsAndValues map[string]string) (bool, error) {
-	return s.MsetnxCtx(context.Background(), fieldsAndValues)
-}
-
-func (s *Redis) MsetnxCtx(ctx context.Context, fieldsAndValues map[string]string) (val bool, err error) {
+// MsetCtx is the implementation of redis mset command.
+func (s *Redis) MsetCtx(ctx context.Context, fieldsAndValues ...any) (val string, err error) {
 	err = s.brk.DoWithAcceptable(func() error {
 		conn, err := getRedis(s)
 		if err != nil {
 			return err
 		}
 
-		vals := make(map[string]interface{}, len(fieldsAndValues))
-		for k, v := range fieldsAndValues {
-			vals[k] = v
-		}
-
-		val, err = conn.MSetNX(ctx, vals).Result()
+		val, err = conn.MSet(ctx, fieldsAndValues...).Result()
 		return err
 	}, acceptable)
 
@@ -2046,7 +2015,14 @@ func (s *Redis) TtlCtx(ctx context.Context, key string) (val int, err error) {
 			return err
 		}
 
-		val = int(duration / time.Second)
+		if duration >= 0 {
+			val = int(duration / time.Second)
+		} else {
+			// -2 means key does not exist
+			// -1 means key exists but has no expire
+			val = int(duration)
+		}
+
 		return nil
 	}, acceptable)
 
@@ -2078,7 +2054,47 @@ func (s *Redis) ZaddFloatCtx(ctx context.Context, key string, score float64, val
 			return err
 		}
 
-		v, err := conn.ZAdd(ctx, key, &red.Z{
+		v, err := conn.ZAdd(ctx, key, red.Z{
+			Score:  score,
+			Member: value,
+		}).Result()
+		if err != nil {
+			return err
+		}
+
+		val = v == 1
+		return nil
+	}, acceptable)
+
+	return
+}
+
+// Zaddnx is the implementation of redis zadd nx command.
+func (s *Redis) Zaddnx(key string, score int64, value string) (val bool, err error) {
+	return s.ZaddnxCtx(context.Background(), key, score, value)
+}
+
+// ZaddnxCtx is the implementation of redis zadd nx command.
+func (s *Redis) ZaddnxCtx(ctx context.Context, key string, score int64, value string) (
+	val bool, err error) {
+	return s.ZaddnxFloatCtx(ctx, key, float64(score), value)
+}
+
+// ZaddnxFloat is the implementation of redis zaddnx command.
+func (s *Redis) ZaddnxFloat(key string, score float64, value string) (bool, error) {
+	return s.ZaddFloatCtx(context.Background(), key, score, value)
+}
+
+// ZaddnxFloatCtx is the implementation of redis zaddnx command.
+func (s *Redis) ZaddnxFloatCtx(ctx context.Context, key string, score float64, value string) (
+	val bool, err error) {
+	err = s.brk.DoWithAcceptable(func() error {
+		conn, err := getRedis(s)
+		if err != nil {
+			return err
+		}
+
+		v, err := conn.ZAddNX(ctx, key, red.Z{
 			Score:  score,
 			Member: value,
 		}).Result()
@@ -2106,19 +2122,14 @@ func (s *Redis) ZaddsCtx(ctx context.Context, key string, ps ...Pair) (val int64
 			return err
 		}
 
-		var zs []*red.Z
+		var zs []red.Z
 		for _, p := range ps {
-			z := &red.Z{Score: float64(p.Score), Member: p.Key}
+			z := red.Z{Score: float64(p.Score), Member: p.Key}
 			zs = append(zs, z)
 		}
 
-		v, err := conn.ZAdd(ctx, key, zs...).Result()
-		if err != nil {
-			return err
-		}
-
-		val = v
-		return nil
+		val, err = conn.ZAdd(ctx, key, zs...).Result()
+		return err
 	}, acceptable)
 
 	return
@@ -2238,6 +2249,7 @@ func (s *Redis) ZscoreByFloatCtx(ctx context.Context, key, value string) (val fl
 		if err != nil {
 			return err
 		}
+
 		val, err = conn.ZScore(ctx, key, value).Result()
 		return err
 	}, acceptable)
@@ -2902,7 +2914,7 @@ func withHook(hook red.Hook) Option {
 }
 
 func acceptable(err error) bool {
-	return err == nil || err == red.Nil || errors.Is(err, context.Canceled)
+	return err == nil || errors.Is(err, red.Nil) || errors.Is(err, context.Canceled)
 }
 
 func getRedis(r *Redis) (RedisNode, error) {
