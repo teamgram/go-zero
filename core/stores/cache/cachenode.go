@@ -335,14 +335,14 @@ func (c cacheNode) TakesCtx(ctx context.Context, query func(keys ...string) (map
 			for k, v := range values {
 				if v == nil {
 					seconds := int(math.Ceil(c.aroundDuration(c.notFoundExpiry).Seconds()))
-					pipe.SetEX(ctx, k, notFoundPlaceholder, time.Duration(seconds)*time.Second)
+					pipe.SetEx(ctx, k, notFoundPlaceholder, time.Duration(seconds)*time.Second)
 				} else {
 					data, err2 := jsonx.MarshalToString(v)
 					if err2 != nil {
 						logger.Error(err2)
 					} else {
 						seconds := int(math.Ceil(c.aroundDuration(c.expiry).Seconds()))
-						pipe.SetEX(ctx, k, data, time.Duration(seconds)*time.Second)
+						pipe.SetEx(ctx, k, data, time.Duration(seconds)*time.Second)
 					}
 				}
 			}
