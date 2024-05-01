@@ -90,8 +90,8 @@ type (
 	StringCmd = red.StringCmd
 	// Script is an alias of redis.Script.
 	Script = red.Script
-	// StringStringMapCmd is an alias of redis.StringStringMapCmd.
-	StringStringMapCmd = red.StringStringMapCmd
+	// MapStringStringCmd is an alias of redis.MapStringStringCmd.
+	MapStringStringCmd = red.MapStringStringCmd
 )
 
 // MustNewRedis returns a Redis with given options.
