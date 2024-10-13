@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"reflect"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -51,6 +52,26 @@ type (
 	}
 )
 
+// AddWriter adds a new writer.
+// If there is already a writer, the new writer will be added to the writer chain.
+// For example, to write logs to both file and console, if there is already a file writer,
+// ```go
+// logx.AddWriter(logx.NewWriter(os.Stdout))
+// ```
+func AddWriter(w Writer) {
+	ow := Reset()
+	if ow == nil {
+		SetWriter(w)
+	} else {
+		// no need to check if the existing writer is a comboWriter,
+		// because it is not common to add more than one writer.
+		// even more than one writer, the behavior is the same.
+		SetWriter(comboWriter{
+			writers: []Writer{ow, w},
+		})
+	}
+}
+
 // Alert alerts v in alert level, and the message is written to error log.
 func Alert(v string) {
 	getWriter().Alert(v)
@@ -86,7 +107,7 @@ func Debugv(v any) {
 	}
 }
 
-// Debugw writes msg along with fields into access log.
+// Debugw writes msg along with fields into the access log.
 func Debugw(msg string, fields ...LogField) {
 	if shallLog(DebugLevel) {
 		writeDebug(msg, fields...)
@@ -142,7 +163,7 @@ func Errorv(v any) {
 	}
 }
 
-// Errorw writes msg along with fields into error log.
+// Errorw writes msg along with fields into the error log.
 func Errorw(msg string, fields ...LogField) {
 	if shallLog(ErrorLevel) {
 		writeError(msg, fields...)
@@ -153,11 +174,11 @@ func Errorw(msg string, fields ...LogField) {
 func Field(key string, value any) LogField {
 	switch val := value.(type) {
 	case error:
-		return LogField{Key: key, Value: val.Error()}
+		return LogField{Key: key, Value: encodeError(val)}
 	case []error:
 		var errs []string
 		for _, err := range val {
-			errs = append(errs, err.Error())
+			errs = append(errs, encodeError(err))
 		}
 		return LogField{Key: key, Value: errs}
 	case time.Duration:
@@ -175,11 +196,11 @@ func Field(key string, value any) LogField {
 		}
 		return LogField{Key: key, Value: times}
 	case fmt.Stringer:
-		return LogField{Key: key, Value: val.String()}
+		return LogField{Key: key, Value: encodeStringer(val)}
 	case []fmt.Stringer:
 		var strs []string
 		for _, str := range val {
-			strs = append(strs, str.String())
+			strs = append(strs, encodeStringer(str))
 		}
 		return LogField{Key: key, Value: strs}
 	default:
@@ -208,7 +229,7 @@ func Infov(v any) {
 	}
 }
 
-// Infow writes msg along with fields into access log.
+// Infow writes msg along with fields into the access log.
 func Infow(msg string, fields ...LogField) {
 	if shallLog(InfoLevel) {
 		writeInfo(msg, fields...)
@@ -254,11 +275,12 @@ func SetWriter(w Writer) {
 	}
 }
 
-// SetUp sets up the logx. If already set up, just return nil.
-// we allow SetUp to be called multiple times, because for example
+// SetUp sets up the logx.
+// If already set up, return nil.
+// We allow SetUp to be called multiple times, because, for example,
 // we need to allow different service frameworks to initialize logx respectively.
 func SetUp(c LogConf) (err error) {
-	// Just ignore the subsequent SetUp calls.
+	// Ignore the later SetUp calls.
 	// Because multiple services in one process might call SetUp respectively.
 	// Need to wait for the first caller to complete the execution.
 	setupOnce.Do(func() {
@@ -270,6 +292,10 @@ func SetUp(c LogConf) (err error) {
 
 		if len(c.TimeFormat) > 0 {
 			timeFormat = c.TimeFormat
+		}
+
+		if len(c.FileTimeFormat) > 0 {
+			fileTimeFormat = c.FileTimeFormat
 		}
 
 		atomic.StoreUint32(&maxContentLength, c.MaxContentLength)
@@ -413,6 +439,32 @@ func createOutput(path string) (io.WriteCloser, error) {
 	return NewLogger(path, rule, options.gzipEnabled)
 }
 
+func encodeError(err error) (ret string) {
+	return encodeWithRecover(err, func() string {
+		return err.Error()
+	})
+}
+
+func encodeStringer(v fmt.Stringer) (ret string) {
+	return encodeWithRecover(v, func() string {
+		return v.String()
+	})
+}
+
+func encodeWithRecover(arg any, fn func() string) (ret string) {
+	defer func() {
+		if err := recover(); err != nil {
+			if v := reflect.ValueOf(arg); v.Kind() == reflect.Ptr && v.IsNil() {
+				ret = nilAngleString
+			} else {
+				ret = fmt.Sprintf("panic: %v", err)
+			}
+		}
+	}()
+
+	return fn()
+}
+
 func getWriter() Writer {
 	w := writer.Load()
 	if w == nil {
@@ -480,7 +532,7 @@ func writeDebug(val any, fields ...LogField) {
 	getWriter().Debug(val, addCaller(fields...)...)
 }
 
-// writeError writes v into error log.
+// writeError writes v into the error log.
 // Not checking shallLog here is for performance consideration.
 // If we check shallLog here, the fmt.Sprint might be called even if the log level is not enabled.
 // The caller should check shallLog before calling this function.
@@ -520,7 +572,7 @@ func writeStack(msg string) {
 	getWriter().Stack(fmt.Sprintf("%s\n%s", msg, string(debug.Stack())))
 }
 
-// writeStat writes v into stat log.
+// writeStat writes v into the stat log.
 // Not checking shallLog here is for performance consideration.
 // If we check shallLog here, the fmt.Sprint might be called even if the log level is not enabled.
 // The caller should check shallLog before calling this function.

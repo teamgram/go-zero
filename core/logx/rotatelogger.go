@@ -19,7 +19,6 @@ import (
 
 const (
 	dateFormat      = "2006-01-02"
-	fileTimeFormat  = time.RFC3339
 	hoursPerDay     = 24
 	bufferSize      = 100
 	defaultDirMode  = 0o755
@@ -28,8 +27,12 @@ const (
 	megaBytes       = 1 << 20
 )
 
-// ErrLogFileClosed is an error that indicates the log file is already closed.
-var ErrLogFileClosed = errors.New("error: log file closed")
+var (
+	// ErrLogFileClosed is an error that indicates the log file is already closed.
+	ErrLogFileClosed = errors.New("error: log file closed")
+
+	fileTimeFormat = time.RFC3339
+)
 
 type (
 	// A RotateRule interface is used to define the log rotating rules.
@@ -319,7 +322,7 @@ func (l *RotateLogger) maybeCompressFile(file string) {
 	}()
 
 	if _, err := os.Stat(file); err != nil {
-		// file not exists or other error, ignore compression
+		// file doesn't exist or another error, ignore compression
 		return
 	}
 

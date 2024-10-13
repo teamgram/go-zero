@@ -76,8 +76,8 @@ type (
 		avgFlyingLock   syncx.SpinLock
 		overloadTime    *syncx.AtomicDuration
 		droppedRecently *syncx.AtomicBool
-		passCounter     *collection.RollingWindow
-		rtCounter       *collection.RollingWindow
+		passCounter     *collection.RollingWindow[int64, *collection.Bucket[int64]]
+		rtCounter       *collection.RollingWindow[int64, *collection.Bucket[int64]]
 	}
 )
 
@@ -107,15 +107,16 @@ func NewAdaptiveShedder(opts ...ShedderOption) Shedder {
 		opt(&options)
 	}
 	bucketDuration := options.window / time.Duration(options.buckets)
+	newBucket := func() *collection.Bucket[int64] {
+		return new(collection.Bucket[int64])
+	}
 	return &adaptiveShedder{
 		cpuThreshold:    options.cpuThreshold,
 		windowScale:     float64(time.Second) / float64(bucketDuration) / millisecondsPerSecond,
 		overloadTime:    syncx.NewAtomicDuration(),
 		droppedRecently: syncx.NewAtomicBool(),
-		passCounter: collection.NewRollingWindow(options.buckets, bucketDuration,
-			collection.IgnoreCurrentBucket()),
-		rtCounter: collection.NewRollingWindow(options.buckets, bucketDuration,
-			collection.IgnoreCurrentBucket()),
+		passCounter:     collection.NewRollingWindow[int64, *collection.Bucket[int64]](newBucket, options.buckets, bucketDuration, collection.IgnoreCurrentBucket[int64, *collection.Bucket[int64]]()),
+		rtCounter:       collection.NewRollingWindow[int64, *collection.Bucket[int64]](newBucket, options.buckets, bucketDuration, collection.IgnoreCurrentBucket[int64, *collection.Bucket[int64]]()),
 	}
 }
 
@@ -138,10 +139,10 @@ func (as *adaptiveShedder) Allow() (Promise, error) {
 func (as *adaptiveShedder) addFlying(delta int64) {
 	flying := atomic.AddInt64(&as.flying, delta)
 	// update avgFlying when the request is finished.
-	// this strategy makes avgFlying have a little bit lag against flying, and smoother.
+	// this strategy makes avgFlying have a little bit of lag against flying, and smoother.
 	// when the flying requests increase rapidly, avgFlying increase slower, accept more requests.
 	// when the flying requests drop rapidly, avgFlying drop slower, accept fewer requests.
-	// it makes the service to serve as more requests as possible.
+	// it makes the service to serve as many requests as possible.
 	if delta < 0 {
 		as.avgFlyingLock.Lock()
 		as.avgFlying = as.avgFlying*flyingBeta + float64(flying)*(1-flyingBeta)
@@ -167,15 +168,15 @@ func (as *adaptiveShedder) maxFlight() float64 {
 }
 
 func (as *adaptiveShedder) maxPass() int64 {
-	var result float64 = 1
+	var result int64 = 1
 
-	as.passCounter.Reduce(func(b *collection.Bucket) {
+	as.passCounter.Reduce(func(b *collection.Bucket[int64]) {
 		if b.Sum > result {
 			result = b.Sum
 		}
 	})
 
-	return int64(result)
+	return result
 }
 
 func (as *adaptiveShedder) minRt() float64 {
@@ -183,12 +184,12 @@ func (as *adaptiveShedder) minRt() float64 {
 	// its a reasonable large value to avoid dropping requests.
 	result := defaultMinRt
 
-	as.rtCounter.Reduce(func(b *collection.Bucket) {
+	as.rtCounter.Reduce(func(b *collection.Bucket[int64]) {
 		if b.Count <= 0 {
 			return
 		}
 
-		avg := math.Round(b.Sum / float64(b.Count))
+		avg := math.Round(float64(b.Sum) / float64(b.Count))
 		if avg < result {
 			result = avg
 		}
@@ -200,7 +201,7 @@ func (as *adaptiveShedder) minRt() float64 {
 func (as *adaptiveShedder) overloadFactor() float64 {
 	// as.cpuThreshold must be less than cpuMax
 	factor := (cpuMax - float64(stat.CpuUsage())) / (cpuMax - float64(as.cpuThreshold))
-	// at least accept 10% of acceptable requests even cpu is highly overloaded.
+	// at least accept 10% of acceptable requests, even cpu is highly overloaded.
 	return mathx.Between(factor, overloadFactorLowerBound, 1)
 }
 
@@ -250,14 +251,14 @@ func (as *adaptiveShedder) systemOverloaded() bool {
 	return true
 }
 
-// WithBuckets customizes the Shedder with given number of buckets.
+// WithBuckets customizes the Shedder with the given number of buckets.
 func WithBuckets(buckets int) ShedderOption {
 	return func(opts *shedderOptions) {
 		opts.buckets = buckets
 	}
 }
 
-// WithCpuThreshold customizes the Shedder with given cpu threshold.
+// WithCpuThreshold customizes the Shedder with the given cpu threshold.
 func WithCpuThreshold(threshold int64) ShedderOption {
 	return func(opts *shedderOptions) {
 		opts.cpuThreshold = threshold
@@ -283,6 +284,6 @@ func (p *promise) Fail() {
 func (p *promise) Pass() {
 	rt := float64(timex.Since(p.start)) / float64(time.Millisecond)
 	p.shedder.addFlying(-1)
-	p.shedder.rtCounter.Add(math.Ceil(rt))
+	p.shedder.rtCounter.Add(int64(math.Ceil(rt)))
 	p.shedder.passCounter.Add(1)
 }

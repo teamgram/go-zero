@@ -28,15 +28,12 @@ var (
 	directResolverBuilder directBuilder
 	discovResolverBuilder discovBuilder
 	etcdResolverBuilder   etcdBuilder
-	k8sResolverBuilder    kubeBuilder
 )
 
-// RegisterResolver registers the direct and discov schemes to the resolver.
-func RegisterResolver() {
+func register() {
 	resolver.Register(&directResolverBuilder)
 	resolver.Register(&discovResolverBuilder)
 	resolver.Register(&etcdResolverBuilder)
-	resolver.Register(&k8sResolverBuilder)
 }
 
 type nopResolver struct {
@@ -46,5 +43,5 @@ type nopResolver struct {
 func (r *nopResolver) Close() {
 }
 
-func (r *nopResolver) ResolveNow(options resolver.ResolveNowOptions) {
+func (r *nopResolver) ResolveNow(_ resolver.ResolveNowOptions) {
 }

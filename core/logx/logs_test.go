@@ -348,6 +348,27 @@ func TestStructedLogInfow(t *testing.T) {
 	})
 }
 
+func TestStructedLogFieldNil(t *testing.T) {
+	w := new(mockWriter)
+	old := writer.Swap(w)
+	defer writer.Store(old)
+
+	assert.NotPanics(t, func() {
+		var s *string
+		Infow("test", Field("bb", s))
+		var d *nilStringer
+		Infow("test", Field("bb", d))
+		var e *nilError
+		Errorw("test", Field("bb", e))
+	})
+	assert.NotPanics(t, func() {
+		var p panicStringer
+		Infow("test", Field("bb", p))
+		var ps innerPanicStringer
+		Infow("test", Field("bb", ps))
+	})
+}
+
 func TestStructedLogInfoConsoleAny(t *testing.T) {
 	w := new(mockWriter)
 	old := writer.Swap(w)
@@ -570,7 +591,7 @@ func TestErrorfWithWrappedError(t *testing.T) {
 	old := writer.Swap(w)
 	defer writer.Store(old)
 
-	Errorf("hello %w", errors.New(message))
+	Errorf("hello %s", errors.New(message))
 	assert.True(t, strings.Contains(w.String(), "hello there"))
 }
 
@@ -658,6 +679,10 @@ func TestSetup(t *testing.T) {
 
 func TestDisable(t *testing.T) {
 	Disable()
+	defer func() {
+		SetLevel(InfoLevel)
+		atomic.StoreUint32(&encoding, jsonEncodingType)
+	}()
 
 	var opt logOptions
 	WithKeepDays(1)(&opt)
@@ -678,6 +703,17 @@ func TestDisableStat(t *testing.T) {
 	defer writer.Store(old)
 	Stat(message)
 	assert.Equal(t, 0, w.builder.Len())
+}
+
+func TestAddWriter(t *testing.T) {
+	const message = "hello there"
+	w := new(mockWriter)
+	AddWriter(w)
+	w1 := new(mockWriter)
+	AddWriter(w1)
+	Error(message)
+	assert.Contains(t, w.String(), message)
+	assert.Contains(t, w1.String(), message)
 }
 
 func TestSetWriter(t *testing.T) {
@@ -814,12 +850,13 @@ func doTestStructedLogConsole(t *testing.T, w *mockWriter, write func(...any)) {
 func testSetLevelTwiceWithMode(t *testing.T, mode string, w *mockWriter) {
 	writer.Store(nil)
 	SetUp(LogConf{
-		Mode:       mode,
-		Level:      "debug",
-		Path:       "/dev/null",
-		Encoding:   plainEncoding,
-		Stat:       false,
-		TimeFormat: time.RFC3339,
+		Mode:           mode,
+		Level:          "debug",
+		Path:           "/dev/null",
+		Encoding:       plainEncoding,
+		Stat:           false,
+		TimeFormat:     time.RFC3339,
+		FileTimeFormat: time.DateTime,
 	})
 	SetUp(LogConf{
 		Mode:  mode,
@@ -858,4 +895,37 @@ func validateFields(t *testing.T, content string, fields map[string]any) {
 			assert.Equal(t, v, m[k], content)
 		}
 	}
+}
+
+type nilError struct {
+	Name string
+}
+
+func (e *nilError) Error() string {
+	return e.Name
+}
+
+type nilStringer struct {
+	Name string
+}
+
+func (s *nilStringer) String() string {
+	return s.Name
+}
+
+type innerPanicStringer struct {
+	Inner *struct {
+		Name string
+	}
+}
+
+func (s innerPanicStringer) String() string {
+	return s.Inner.Name
+}
+
+type panicStringer struct {
+}
+
+func (s panicStringer) String() string {
+	panic("panic")
 }
