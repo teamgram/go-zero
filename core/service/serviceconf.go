@@ -8,6 +8,7 @@ import (
 	"github.com/zeromicro/go-zero/core/stat"
 	"github.com/zeromicro/go-zero/core/trace"
 	"github.com/zeromicro/go-zero/internal/devserver"
+	"github.com/zeromicro/go-zero/internal/profiling"
 )
 
 const (
@@ -37,6 +38,9 @@ type (
 		Prometheus prometheus.Config `json:",optional"`
 		Telemetry  trace.Config      `json:",optional"`
 		DevServer  DevServerConfig   `json:",optional"`
+		Shutdown   proc.ShutdownConf `json:",optional"`
+		// Profiling is the configuration for continuous profiling.
+		Profiling profiling.Config `json:",optional"`
 	}
 )
 
@@ -61,6 +65,7 @@ func (sc ServiceConf) SetUp() error {
 		sc.Telemetry.Name = sc.Name
 	}
 	trace.StartAgent(sc.Telemetry)
+	proc.Setup(sc.Shutdown)
 	proc.AddShutdownListener(func() {
 		trace.StopAgent()
 	})
@@ -68,7 +73,9 @@ func (sc ServiceConf) SetUp() error {
 	if len(sc.MetricsUrl) > 0 {
 		stat.SetReportWriter(stat.NewRemoteWriter(sc.MetricsUrl))
 	}
+
 	devserver.StartAgent(sc.DevServer)
+	profiling.Start(sc.Profiling)
 
 	return nil
 }

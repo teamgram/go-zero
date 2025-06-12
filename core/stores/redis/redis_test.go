@@ -1071,6 +1071,34 @@ func TestRedis_Set(t *testing.T) {
 	})
 }
 
+func TestRedis_GetDel(t *testing.T) {
+	t.Run("get_del", func(t *testing.T) {
+		runOnRedis(t, func(client *Redis) {
+			val, err := newRedis(client.Addr).GetDel("hello")
+			assert.Equal(t, "", val)
+			assert.Nil(t, err)
+			err = client.Set("hello", "world")
+			assert.Nil(t, err)
+			val, err = client.Get("hello")
+			assert.Nil(t, err)
+			assert.Equal(t, "world", val)
+			val, err = client.GetDel("hello")
+			assert.Nil(t, err)
+			assert.Equal(t, "world", val)
+			val, err = client.Get("hello")
+			assert.Nil(t, err)
+			assert.Equal(t, "", val)
+		})
+	})
+
+	t.Run("get_del_with_error", func(t *testing.T) {
+		runOnRedisWithError(t, func(client *Redis) {
+			_, err := newRedis(client.Addr, badType()).GetDel("hello")
+			assert.Error(t, err)
+		})
+	})
+}
+
 func TestRedis_GetSet(t *testing.T) {
 	t.Run("set_get", func(t *testing.T) {
 		runOnRedis(t, func(client *Redis) {
@@ -1996,9 +2024,9 @@ func TestSetSlowThreshold(t *testing.T) {
 	assert.Equal(t, time.Second, slowThreshold.Load())
 }
 
-func TestRedis_WithPass(t *testing.T) {
+func TestRedis_WithUserPass(t *testing.T) {
 	runOnRedis(t, func(client *Redis) {
-		err := newRedis(client.Addr, WithPass("any")).Ping()
+		err := newRedis(client.Addr, WithUser("any"), WithPass("any")).Ping()
 		assert.NotNil(t, err)
 	})
 }
@@ -2119,9 +2147,9 @@ func TestRedisUnlink(t *testing.T) {
 func TestRedisTxPipeline(t *testing.T) {
 	runOnRedis(t, func(client *Redis) {
 		ctx := context.Background()
-		pipe, err := newRedis(client.Addr, badType()).TxPipeline()
+		_, err := newRedis(client.Addr, badType()).TxPipeline()
 		assert.NotNil(t, err)
-		pipe, err = client.TxPipeline()
+		pipe, err := client.TxPipeline()
 		assert.Nil(t, err)
 		key := "key"
 		hashKey := "field"

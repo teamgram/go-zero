@@ -10,6 +10,8 @@ info ( // info stmt
     author:  "type author here"
     email:   "type email here"
     version: "type version here"
+    enable: true
+    disable: false
 )
 
 type AliasInt int
@@ -129,6 +131,7 @@ service test {
 @server (
     jwt: Auth
     group: Group1
+    foo:"bar"
 )
 service test {
     @doc "ping"
